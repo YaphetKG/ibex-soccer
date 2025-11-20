@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { RetroButton, RetroCard, LoadingSpinner } from './RetroUI';
-import { TeamEvent, RecruitProfile, ScoutCard, ViewState } from '../types';
+import { TeamEvent, RecruitProfile, ScoutCard, ViewState, HistoryItem } from '../types';
 import { generateScoutCard, getTacticalAdvice, generateKit, generateChant } from '../services/geminiService';
+import { getSheetUrl, setSheetUrl, postToSheet } from '../services/sheetService';
 
 // --- HOME VIEW ---
 export const HomeView: React.FC<{ onNavigate: (view: ViewState) => void }> = ({ onNavigate }) => {
@@ -44,8 +46,8 @@ export const HomeView: React.FC<{ onNavigate: (view: ViewState) => void }> = ({ 
           <button onClick={() => onNavigate(ViewState.TACTICS)} className="flex items-center gap-2 hover:text-white group">
             <span className="text-retro-green group-hover:text-retro-gold">✓</span> Tactical Board
           </button>
-          <button onClick={() => onNavigate(ViewState.CHANTS)} className="flex items-center gap-2 hover:text-white group">
-            <span className="text-retro-green group-hover:text-retro-gold">✓</span> Ultras Songbook
+          <button onClick={() => onNavigate(ViewState.HISTORY)} className="flex items-center gap-2 hover:text-white group">
+            <span className="text-retro-green group-hover:text-retro-gold">✓</span> Club History
           </button>
         </div>
       </div>
@@ -54,18 +56,14 @@ export const HomeView: React.FC<{ onNavigate: (view: ViewState) => void }> = ({ 
 };
 
 // --- EVENTS VIEW ---
-export const EventsView: React.FC = () => {
-  const [events] = useState<TeamEvent[]>([
-    { id: 1, title: 'League Match vs Durham Dynamo', date: '2023-11-15 15:00', location: 'WRAL Park', type: 'MATCH' },
-    { id: 2, title: 'Goat Yoga Recovery', date: '2023-11-16 10:00', location: 'City Plaza', type: 'SOCIAL' },
-    { id: 3, title: 'Tactical Drill', date: '2023-11-17 19:00', location: 'Training Ground B', type: 'TRAINING' },
-    { id: 4, title: 'Cup Semi-Final', date: '2023-11-25 15:00', location: 'WakeMed Park', type: 'MATCH' },
-  ]);
-
+export const EventsView: React.FC<{ events: TeamEvent[] }> = ({ events }) => {
   return (
     <div className="max-w-4xl mx-auto p-4 animate-slide-up">
       <h2 className="font-header text-3xl text-retro-gold mb-8 text-center text-shadow-retro">SEASON SCHEDULE</h2>
       <div className="space-y-6">
+        {events.length === 0 && (
+          <p className="text-center font-body text-2xl text-gray-500">NO FIXTURES SCHEDULED. THE GAFFER IS SLEEPING.</p>
+        )}
         {events.map(evt => (
           <div key={evt.id} className="relative group">
              <div className="absolute inset-0 bg-retro-navy translate-x-2 translate-y-2 group-hover:translate-x-3 group-hover:translate-y-3 transition-transform"></div>
@@ -85,6 +83,228 @@ export const EventsView: React.FC = () => {
           </div>
         ))}
       </div>
+    </div>
+  );
+};
+
+// --- HISTORY VIEW ---
+export const HistoryView: React.FC<{ history: HistoryItem[] }> = ({ history }) => {
+  const trophies = history.filter(h => h.type === 'TROPHY');
+  const moments = history.filter(h => h.type === 'MOMENT');
+
+  return (
+    <div className="max-w-5xl mx-auto p-4 animate-slide-up">
+       <h2 className="font-header text-3xl text-retro-gold mb-12 text-center text-shadow-retro">CLUB ARCHIVES</h2>
+
+       {/* Section 1: The Trophy Case */}
+       <div className="mb-16">
+         <h3 className="font-header text-xl text-retro-accent mb-6 border-b border-retro-accent pb-2 inline-block">HONOR ROLL</h3>
+         {trophies.length === 0 ? <p className="font-body text-gray-500">NO SILVERWARE YET.</p> : (
+           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              {trophies.map((item) => (
+                 <div key={item.id} className="bg-retro-navy p-6 border-4 border-double border-retro-gold text-center hover:-translate-y-2 transition-transform">
+                    <div className="text-5xl mb-4">{item.imageUrl || '🏆'}</div>
+                    <h4 className="font-header text-white text-sm mb-2">{item.title}</h4>
+                    <p className="font-body text-gray-400 text-xl">{item.description}</p>
+                    <span className="inline-block mt-2 px-2 bg-retro-gold text-black font-header text-[10px]">{item.year}</span>
+                 </div>
+              ))}
+           </div>
+         )}
+       </div>
+
+       {/* Section 2: Scrapbook Gallery */}
+       <div>
+         <h3 className="font-header text-xl text-retro-green mb-8 border-b border-retro-green pb-2 inline-block">THE SCRAPBOOK</h3>
+         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 p-4">
+            {moments.length === 0 && <p className="font-body text-gray-500">NO MEMORIES LOGGED.</p>}
+            {moments.map((item, idx) => {
+              const rotateClass = idx % 3 === 0 ? 'rotate-2' : idx % 3 === 1 ? '-rotate-3' : 'rotate-1';
+              return (
+                <div key={item.id} className={`bg-white p-3 shadow-lg transform ${rotateClass} hover:rotate-0 transition-transform duration-300 w-full`}>
+                  <div className="bg-gray-800 h-48 w-full flex items-center justify-center overflow-hidden relative group">
+                      {/* Placeholder pattern if no image */}
+                      <div className="absolute inset-0 bg-[radial-gradient(circle,transparent_20%,#000_20%,#000_80%,transparent_80%,transparent),radial-gradient(circle,transparent_20%,#000_20%,#000_80%,transparent_80%,transparent)] bg-[length:8px_8px] bg-[position:0_0,4px_4px] opacity-20"></div>
+                      <span className="font-header text-white opacity-50 text-5xl">{idx + 1}</span>
+                  </div>
+                  <div className="mt-3">
+                    <div className="font-body text-black text-xl text-center uppercase leading-none">{item.title}</div>
+                    <div className="font-body text-gray-500 text-sm text-center">{item.year}</div>
+                    <p className="font-body text-black mt-2 text-sm leading-tight border-t border-gray-300 pt-1">{item.description}</p>
+                  </div>
+                </div>
+              );
+            })}
+         </div>
+       </div>
+    </div>
+  );
+};
+
+// --- ADMIN VIEW ---
+export const AdminView: React.FC<{ onAddEvent: (evt: TeamEvent) => void; onRefresh: () => void }> = ({ onAddEvent, onRefresh }) => {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [pin, setPin] = useState('');
+  const [sheetUrlInput, setSheetUrlInput] = useState('');
+  const [form, setForm] = useState({ title: '', date: '', location: '', type: 'MATCH' as const });
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    setSheetUrlInput(getSheetUrl());
+  }, []);
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pin === '1234' || pin.toUpperCase() === 'IBEX') {
+      setIsAuthenticated(true);
+    } else {
+      alert('INVALID ACCESS CODE');
+      setPin('');
+    }
+  };
+
+  const handleSaveSettings = () => {
+    setSheetUrl(sheetUrlInput);
+    alert('DB SETTINGS SAVED. REFRESHING DATA...');
+    onRefresh();
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.title || !form.date) return;
+    
+    setSubmitting(true);
+    const newEvent: TeamEvent = {
+      id: Date.now(),
+      title: form.title,
+      date: form.date,
+      location: form.location,
+      type: form.type
+    };
+    
+    // Optimistic UI update
+    onAddEvent(newEvent);
+
+    // Send to Sheets
+    const success = await postToSheet('addEvent', newEvent);
+    if (success) {
+      alert('FIXTURE SAVED TO GOOGLE SHEETS');
+    } else {
+      alert('SAVED LOCALLY ONLY (SHEET CONNECTION FAILED)');
+    }
+
+    setForm({ title: '', date: '', location: '', type: 'MATCH' });
+    setSubmitting(false);
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <div className="flex items-center justify-center h-[60vh] animate-fade-in">
+         <div className="bg-black border-4 border-red-600 p-8 max-w-md w-full text-center box-shadow-retro">
+            <h2 className="font-header text-red-600 text-2xl mb-6 blink">RESTRICTED ACCESS</h2>
+            <p className="font-body text-gray-400 mb-6 text-xl">ENTER STAFF ACCESS CODE</p>
+            <form onSubmit={handleLogin} className="space-y-4">
+              <input 
+                type="password" 
+                className="w-full bg-gray-900 border border-red-800 text-red-500 font-header text-center p-4 tracking-[1em] text-xl focus:outline-none"
+                value={pin}
+                onChange={e => setPin(e.target.value)}
+                maxLength={4}
+                placeholder="____"
+                autoFocus
+              />
+              <RetroButton variant="danger" type="submit" className="w-full">AUTHENTICATE</RetroButton>
+            </form>
+         </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-3xl mx-auto p-4 animate-slide-up">
+      <div className="flex justify-between items-end mb-8 border-b-2 border-white pb-4">
+         <div>
+            <h2 className="font-header text-3xl text-white">ADMIN CONSOLE</h2>
+            <p className="font-body text-green-500">SYSTEM STATUS: ONLINE</p>
+         </div>
+         <button onClick={() => setIsAuthenticated(false)} className="font-header text-xs text-red-500 hover:text-red-400">[ LOGOUT ]</button>
+      </div>
+
+      {/* DB Connection Settings */}
+      <div className="bg-gray-900 border border-gray-700 p-4 mb-8">
+         <h3 className="font-header text-gray-400 text-xs mb-2">DATABASE CONNECTION (GOOGLE SHEETS)</h3>
+         <div className="flex gap-2">
+           <input 
+             type="text" 
+             value={sheetUrlInput}
+             onChange={e => setSheetUrlInput(e.target.value)}
+             placeholder="https://script.google.com/macros/s/..."
+             className="flex-1 bg-black border border-gray-600 text-gray-300 font-mono text-sm p-2 focus:outline-none"
+           />
+           <RetroButton onClick={handleSaveSettings} variant="secondary" className="py-2 px-4 text-xs">SAVE</RetroButton>
+         </div>
+         <p className="text-[10px] text-gray-600 mt-2 font-mono">
+           DEPLOY GOOGLE SCRIPT AS WEB APP (ANYONE ACCESS) AND PASTE URL HERE.
+         </p>
+      </div>
+
+      <RetroCard title="SCHEDULE MANAGER">
+         <form onSubmit={handleSubmit} className="space-y-6">
+            <div className="grid md:grid-cols-2 gap-6">
+               <div>
+                 <label className="block font-header text-xs text-gray-400 mb-2">EVENT TITLE</label>
+                 <input
+                  required
+                  type="text"
+                  value={form.title}
+                  onChange={e => setForm({...form, title: e.target.value})}
+                  className="w-full bg-retro-navy/50 border-b-2 border-white text-white font-body text-xl p-2 focus:outline-none"
+                  placeholder="VS. TEAM NAME"
+                 />
+               </div>
+               <div>
+                 <label className="block font-header text-xs text-gray-400 mb-2">DATE & TIME</label>
+                 <input
+                  required
+                  type="datetime-local"
+                  value={form.date}
+                  onChange={e => setForm({...form, date: e.target.value})}
+                  className="w-full bg-retro-navy/50 border-b-2 border-white text-white font-body text-xl p-2 focus:outline-none"
+                 />
+               </div>
+            </div>
+            
+            <div className="grid md:grid-cols-2 gap-6">
+               <div>
+                 <label className="block font-header text-xs text-gray-400 mb-2">LOCATION</label>
+                 <input
+                  required
+                  type="text"
+                  value={form.location}
+                  onChange={e => setForm({...form, location: e.target.value})}
+                  className="w-full bg-retro-navy/50 border-b-2 border-white text-white font-body text-xl p-2 focus:outline-none"
+                  placeholder="FIELD NAME"
+                 />
+               </div>
+               <div>
+                 <label className="block font-header text-xs text-gray-400 mb-2">EVENT TYPE</label>
+                 <select
+                  value={form.type}
+                  onChange={e => setForm({...form, type: e.target.value as any})}
+                  className="w-full bg-retro-navy/50 border-b-2 border-white text-white font-body text-xl p-2 focus:outline-none"
+                 >
+                   <option value="MATCH">LEAGUE MATCH</option>
+                   <option value="TRAINING">TRAINING SESSION</option>
+                   <option value="SOCIAL">SOCIAL EVENT</option>
+                 </select>
+               </div>
+            </div>
+
+            <RetroButton type="submit" className="w-full mt-4" disabled={submitting}>
+              {submitting ? 'SAVING TO CLOUD...' : 'PUBLISH EVENT'}
+            </RetroButton>
+         </form>
+      </RetroCard>
     </div>
   );
 };

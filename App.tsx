@@ -1,10 +1,44 @@
-import React, { useState } from 'react';
-import { ViewState } from './types';
-import { HomeView, EventsView, RecruitView, TacticsView, KitGenView, ChantView } from './components/Views';
+
+import React, { useState, useEffect } from 'react';
+import { ViewState, TeamEvent, HistoryItem } from './types';
+import { HomeView, EventsView, RecruitView, TacticsView, KitGenView, ChantView, HistoryView, AdminView } from './components/Views';
+import { fetchFromSheet } from './services/sheetService';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>(ViewState.HOME);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  // --- Data State ---
+  const [events, setEvents] = useState<TeamEvent[]>([
+    { id: 1, title: 'League Match vs Durham Dynamo', date: '2023-11-15 15:00', location: 'WRAL Park', type: 'MATCH' },
+    { id: 2, title: 'Goat Yoga Recovery', date: '2023-11-16 10:00', location: 'City Plaza', type: 'SOCIAL' },
+  ]);
+
+  const [history, setHistory] = useState<HistoryItem[]>([
+    { id: 1, title: "2023 CUP FINAL", description: "Ibex FC 2 - 1 Highlanders", year: "2023", type: "TROPHY", imageUrl: "🏆" },
+    { id: 2, title: "SUNDAY LEAGUE", description: "Division 2 Champions", year: "2022", type: "TROPHY", imageUrl: "🥇" },
+    { id: 3, title: "FIRST MATCH", description: "The squad assembles for the first time.", year: "2021", type: "MOMENT", imageUrl: "" },
+  ]);
+
+  // Load data from Sheets if configured
+  const refreshData = async () => {
+    setLoading(true);
+    const remoteEvents = await fetchFromSheet('getEvents');
+    if (remoteEvents) setEvents(remoteEvents);
+
+    const remoteHistory = await fetchFromSheet('getHistory');
+    if (remoteHistory) setHistory(remoteHistory);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    refreshData();
+  }, []);
+
+  const handleAddEvent = (newEvent: TeamEvent) => {
+    setEvents(prev => [...prev, newEvent]);
+  };
 
   const NavItem = ({ view, label }: { view: ViewState; label: string }) => (
     <button
@@ -49,6 +83,7 @@ const App: React.FC = () => {
           <div className="hidden md:flex gap-6 lg:gap-8">
             <NavItem view={ViewState.HOME} label="Home" />
             <NavItem view={ViewState.EVENTS} label="Fixtures" />
+            <NavItem view={ViewState.HISTORY} label="History" />
             <NavItem view={ViewState.RECRUIT} label="Join" />
             <NavItem view={ViewState.TACTICS} label="Gaffer" />
             <NavItem view={ViewState.KIT_GEN} label="Kit Lab" />
@@ -63,33 +98,55 @@ const App: React.FC = () => {
 
         {/* Mobile Menu Dropdown */}
         {isMenuOpen && (
-          <div className="md:hidden bg-retro-navy border-b-4 border-white p-4 flex flex-col gap-4 absolute w-full z-50">
+          <div className="md:hidden bg-retro-navy border-b-4 border-white p-4 flex flex-col gap-4 absolute w-full z-50 shadow-xl">
             <NavItem view={ViewState.HOME} label="Home" />
             <NavItem view={ViewState.EVENTS} label="Fixtures" />
+            <NavItem view={ViewState.HISTORY} label="Club History" />
             <NavItem view={ViewState.RECRUIT} label="Join Us" />
             <NavItem view={ViewState.TACTICS} label="The Gaffer" />
             <NavItem view={ViewState.KIT_GEN} label="Kit Lab" />
             <NavItem view={ViewState.CHANTS} label="Ultras Songbook" />
+            <div className="pt-4 border-t border-white/20">
+               <NavItem view={ViewState.ADMIN} label="Admin Portal" />
+            </div>
           </div>
         )}
       </nav>
 
+      {/* Loading Indicator */}
+      {loading && (
+        <div className="absolute top-20 right-4 z-50">
+          <div className="w-4 h-4 bg-retro-green animate-pulse"></div>
+        </div>
+      )}
+
       {/* Main Content */}
       <main className="flex-1 container mx-auto p-4 md:p-8 relative">
         {currentView === ViewState.HOME && <HomeView onNavigate={setCurrentView} />}
-        {currentView === ViewState.EVENTS && <EventsView />}
+        {currentView === ViewState.EVENTS && <EventsView events={events} />}
+        {currentView === ViewState.HISTORY && <HistoryView history={history} />}
         {currentView === ViewState.RECRUIT && <RecruitView />}
         {currentView === ViewState.TACTICS && <TacticsView />}
         {currentView === ViewState.KIT_GEN && <KitGenView />}
         {currentView === ViewState.CHANTS && <ChantView />}
+        {currentView === ViewState.ADMIN && <AdminView onAddEvent={handleAddEvent} onRefresh={refreshData} />}
       </main>
 
       {/* Footer */}
       <footer className="border-t-4 border-white bg-retro-navy py-8 mt-auto">
         <div className="container mx-auto px-4 text-center">
-          <p className="font-body text-xl text-retro-gold mb-2">
-            © 2024 IBEX FOOTBALL CLUB • EST. RALEIGH
-          </p>
+          <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-4">
+             <p className="font-body text-xl text-retro-gold">
+              © 2024 IBEX FOOTBALL CLUB • EST. RALEIGH
+            </p>
+             <button 
+               onClick={() => setCurrentView(ViewState.ADMIN)}
+               className="text-gray-600 hover:text-retro-accent font-header text-[10px] uppercase"
+             >
+               [ Staff Login ]
+             </button>
+          </div>
+         
           <div className="flex justify-center gap-4 font-header text-xs text-white">
             <a href="#" className="hover:text-retro-gold">INSTAGRAM</a>
             <a href="#" className="hover:text-retro-gold">DISCORD</a>

@@ -1,9 +1,19 @@
+
 export interface TeamEvent {
   id: number;
   title: string;
   date: string;
   location: string;
   type: 'MATCH' | 'TRAINING' | 'SOCIAL';
+}
+
+export interface HistoryItem {
+  id: number;
+  title: string;
+  description: string;
+  year: string;
+  type: 'TROPHY' | 'MOMENT';
+  imageUrl?: string;
 }
 
 export interface RecruitProfile {
@@ -30,5 +40,7 @@ export enum ViewState {
   RECRUIT = 'RECRUIT',
   TACTICS = 'TACTICS',
   KIT_GEN = 'KIT_GEN',
-  CHANTS = 'CHANTS'
+  CHANTS = 'CHANTS',
+  HISTORY = 'HISTORY',
+  ADMIN = 'ADMIN'
 }
