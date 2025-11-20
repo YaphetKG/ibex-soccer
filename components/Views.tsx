@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { RetroButton, RetroCard, LoadingSpinner } from './RetroUI';
-import { TeamEvent, RecruitProfile, ScoutCard, ViewState, HistoryItem } from '../types';
+import { TeamEvent, RecruitProfile, ScoutCard, ViewState, HistoryItem, SquadMember } from '../types';
 import { generateScoutCard, getTacticalAdvice, generateKit, generateChant } from '../services/geminiService';
-import { getSheetUrl, setSheetUrl, postToSheet } from '../services/sheetService';
+import { addEvent, addHistoryItem, addRecruit, subscribeToRecruits, approveRecruit, subscribeToSquad } from '../services/firebase';
 
 // --- HOME VIEW ---
 export const HomeView: React.FC<{ onNavigate: (view: ViewState) => void }> = ({ onNavigate }) => {
@@ -73,7 +73,7 @@ export const EventsView: React.FC<{ events: TeamEvent[] }> = ({ events }) => {
                     <span className={`px-2 py-1 font-header text-xs text-black ${evt.type === 'MATCH' ? 'bg-retro-gold' : evt.type === 'TRAINING' ? 'bg-retro-green' : 'bg-retro-accent'}`}>
                       {evt.type}
                     </span>
-                    <span className="font-body text-xl text-gray-400">{evt.date}</span>
+                    <span className="font-body text-xl text-gray-400">{evt.date.replace('T', ' ')}</span>
                   </div>
                   <h3 className="font-header text-xl text-white">{evt.title}</h3>
                   <p className="font-body text-lg text-retro-green mt-1">@{evt.location}</p>
@@ -103,7 +103,13 @@ export const HistoryView: React.FC<{ history: HistoryItem[] }> = ({ history }) =
            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               {trophies.map((item) => (
                  <div key={item.id} className="bg-retro-navy p-6 border-4 border-double border-retro-gold text-center hover:-translate-y-2 transition-transform">
-                    <div className="text-5xl mb-4">{item.imageUrl || '🏆'}</div>
+                    <div className="text-5xl mb-4">
+                      {item.imageUrl && item.imageUrl.startsWith('http') ? (
+                         <img src={item.imageUrl} alt={item.title} className="w-20 h-20 mx-auto object-contain" />
+                      ) : (
+                        '🏆'
+                      )}
+                    </div>
                     <h4 className="font-header text-white text-sm mb-2">{item.title}</h4>
                     <p className="font-body text-gray-400 text-xl">{item.description}</p>
                     <span className="inline-block mt-2 px-2 bg-retro-gold text-black font-header text-[10px]">{item.year}</span>
@@ -123,9 +129,14 @@ export const HistoryView: React.FC<{ history: HistoryItem[] }> = ({ history }) =
               return (
                 <div key={item.id} className={`bg-white p-3 shadow-lg transform ${rotateClass} hover:rotate-0 transition-transform duration-300 w-full`}>
                   <div className="bg-gray-800 h-48 w-full flex items-center justify-center overflow-hidden relative group">
-                      {/* Placeholder pattern if no image */}
-                      <div className="absolute inset-0 bg-[radial-gradient(circle,transparent_20%,#000_20%,#000_80%,transparent_80%,transparent),radial-gradient(circle,transparent_20%,#000_20%,#000_80%,transparent_80%,transparent)] bg-[length:8px_8px] bg-[position:0_0,4px_4px] opacity-20"></div>
-                      <span className="font-header text-white opacity-50 text-5xl">{idx + 1}</span>
+                      {item.imageUrl ? (
+                        <img src={item.imageUrl} className="w-full h-full object-cover grayscale hover:grayscale-0 transition-all" />
+                      ) : (
+                         <>
+                          <div className="absolute inset-0 bg-[radial-gradient(circle,transparent_20%,#000_20%,#000_80%,transparent_80%,transparent),radial-gradient(circle,transparent_20%,#000_20%,#000_80%,transparent_80%,transparent)] bg-[length:8px_8px] bg-[position:0_0,4px_4px] opacity-20"></div>
+                          <span className="font-header text-white opacity-50 text-5xl">{idx + 1}</span>
+                         </>
+                      )}
                   </div>
                   <div className="mt-3">
                     <div className="font-body text-black text-xl text-center uppercase leading-none">{item.title}</div>
@@ -142,16 +153,28 @@ export const HistoryView: React.FC<{ history: HistoryItem[] }> = ({ history }) =
 };
 
 // --- ADMIN VIEW ---
-export const AdminView: React.FC<{ onAddEvent: (evt: TeamEvent) => void; onRefresh: () => void }> = ({ onAddEvent, onRefresh }) => {
+export const AdminView: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [pin, setPin] = useState('');
-  const [sheetUrlInput, setSheetUrlInput] = useState('');
-  const [form, setForm] = useState({ title: '', date: '', location: '', type: 'MATCH' as const });
-  const [submitting, setSubmitting] = useState(false);
+  const [activeTab, setActiveTab] = useState<'EVENTS' | 'SQUAD' | 'HISTORY'>('EVENTS');
+
+  // Logic for Events
+  const [eventForm, setEventForm] = useState({ title: '', date: '', location: '', type: 'MATCH' as const });
+  
+  // Logic for History
+  const [historyForm, setHistoryForm] = useState({ title: '', description: '', year: new Date().getFullYear().toString(), type: 'MOMENT' as const, imageUrl: '' });
+
+  // Logic for Recruits/Squad
+  const [recruits, setRecruits] = useState<RecruitProfile[]>([]);
+  const [squad, setSquad] = useState<SquadMember[]>([]);
 
   useEffect(() => {
-    setSheetUrlInput(getSheetUrl());
-  }, []);
+    if (isAuthenticated && activeTab === 'SQUAD') {
+      const unsubRecruits = subscribeToRecruits(setRecruits);
+      const unsubSquad = subscribeToSquad(setSquad);
+      return () => { unsubRecruits(); unsubSquad(); };
+    }
+  }, [isAuthenticated, activeTab]);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -163,38 +186,34 @@ export const AdminView: React.FC<{ onAddEvent: (evt: TeamEvent) => void; onRefre
     }
   };
 
-  const handleSaveSettings = () => {
-    setSheetUrl(sheetUrlInput);
-    alert('DB SETTINGS SAVED. REFRESHING DATA...');
-    onRefresh();
+  const handleAddEvent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await addEvent(eventForm);
+      alert('EVENT ADDED TO FIREBASE');
+      setEventForm({ title: '', date: '', location: '', type: 'MATCH' });
+    } catch (err) {
+      alert('ERROR: CHECK CONSOLE OR FIREBASE CONFIG');
+    }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleAddHistory = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.title || !form.date) return;
-    
-    setSubmitting(true);
-    const newEvent: TeamEvent = {
-      id: Date.now(),
-      title: form.title,
-      date: form.date,
-      location: form.location,
-      type: form.type
-    };
-    
-    // Optimistic UI update
-    onAddEvent(newEvent);
-
-    // Send to Sheets
-    const success = await postToSheet('addEvent', newEvent);
-    if (success) {
-      alert('FIXTURE SAVED TO GOOGLE SHEETS');
-    } else {
-      alert('SAVED LOCALLY ONLY (SHEET CONNECTION FAILED)');
+    try {
+      await addHistoryItem(historyForm);
+      alert('HISTORY ITEM ARCHIVED');
+      setHistoryForm({ title: '', description: '', year: new Date().getFullYear().toString(), type: 'MOMENT', imageUrl: '' });
+    } catch (err) {
+      alert('ERROR SAVING HISTORY');
     }
+  };
 
-    setForm({ title: '', date: '', location: '', type: 'MATCH' });
-    setSubmitting(false);
+  const handleApproveRecruit = async (r: RecruitProfile) => {
+    if (!r.id) return;
+    const confirm = window.confirm(`Promote ${r.name} to the official squad?`);
+    if (confirm) {
+      await approveRecruit(r.id, r);
+    }
   };
 
   if (!isAuthenticated) {
@@ -215,96 +234,160 @@ export const AdminView: React.FC<{ onAddEvent: (evt: TeamEvent) => void; onRefre
               />
               <RetroButton variant="danger" type="submit" className="w-full">AUTHENTICATE</RetroButton>
             </form>
+            <p className="mt-4 text-[10px] text-gray-600 font-mono">
+              NOTE: Configure Firebase in services/firebase.ts
+            </p>
          </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-3xl mx-auto p-4 animate-slide-up">
-      <div className="flex justify-between items-end mb-8 border-b-2 border-white pb-4">
+    <div className="max-w-4xl mx-auto p-4 animate-slide-up">
+      <div className="flex justify-between items-end mb-6 border-b-2 border-white pb-4">
          <div>
             <h2 className="font-header text-3xl text-white">ADMIN CONSOLE</h2>
-            <p className="font-body text-green-500">SYSTEM STATUS: ONLINE</p>
+            <p className="font-body text-green-500">FIREBASE: CONNECTED</p>
          </div>
          <button onClick={() => setIsAuthenticated(false)} className="font-header text-xs text-red-500 hover:text-red-400">[ LOGOUT ]</button>
       </div>
 
-      {/* DB Connection Settings */}
-      <div className="bg-gray-900 border border-gray-700 p-4 mb-8">
-         <h3 className="font-header text-gray-400 text-xs mb-2">DATABASE CONNECTION (GOOGLE SHEETS)</h3>
-         <div className="flex gap-2">
-           <input 
-             type="text" 
-             value={sheetUrlInput}
-             onChange={e => setSheetUrlInput(e.target.value)}
-             placeholder="https://script.google.com/macros/s/..."
-             className="flex-1 bg-black border border-gray-600 text-gray-300 font-mono text-sm p-2 focus:outline-none"
-           />
-           <RetroButton onClick={handleSaveSettings} variant="secondary" className="py-2 px-4 text-xs">SAVE</RetroButton>
-         </div>
-         <p className="text-[10px] text-gray-600 mt-2 font-mono">
-           DEPLOY GOOGLE SCRIPT AS WEB APP (ANYONE ACCESS) AND PASTE URL HERE.
-         </p>
+      {/* Admin Tabs */}
+      <div className="flex gap-4 mb-8">
+        {['EVENTS', 'SQUAD', 'HISTORY'].map((tab) => (
+          <button 
+            key={tab}
+            onClick={() => setActiveTab(tab as any)}
+            className={`font-header text-xs px-4 py-2 border-2 ${activeTab === tab ? 'bg-white text-black border-white' : 'bg-black text-gray-500 border-gray-700 hover:border-gray-400'}`}
+          >
+            {tab} MANAGER
+          </button>
+        ))}
       </div>
 
-      <RetroCard title="SCHEDULE MANAGER">
-         <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="grid md:grid-cols-2 gap-6">
-               <div>
-                 <label className="block font-header text-xs text-gray-400 mb-2">EVENT TITLE</label>
-                 <input
-                  required
-                  type="text"
-                  value={form.title}
-                  onChange={e => setForm({...form, title: e.target.value})}
-                  className="w-full bg-retro-navy/50 border-b-2 border-white text-white font-body text-xl p-2 focus:outline-none"
-                  placeholder="VS. TEAM NAME"
-                 />
-               </div>
-               <div>
-                 <label className="block font-header text-xs text-gray-400 mb-2">DATE & TIME</label>
-                 <input
-                  required
-                  type="datetime-local"
-                  value={form.date}
-                  onChange={e => setForm({...form, date: e.target.value})}
-                  className="w-full bg-retro-navy/50 border-b-2 border-white text-white font-body text-xl p-2 focus:outline-none"
-                 />
-               </div>
-            </div>
-            
-            <div className="grid md:grid-cols-2 gap-6">
-               <div>
-                 <label className="block font-header text-xs text-gray-400 mb-2">LOCATION</label>
-                 <input
-                  required
-                  type="text"
-                  value={form.location}
-                  onChange={e => setForm({...form, location: e.target.value})}
-                  className="w-full bg-retro-navy/50 border-b-2 border-white text-white font-body text-xl p-2 focus:outline-none"
-                  placeholder="FIELD NAME"
-                 />
-               </div>
-               <div>
-                 <label className="block font-header text-xs text-gray-400 mb-2">EVENT TYPE</label>
-                 <select
-                  value={form.type}
-                  onChange={e => setForm({...form, type: e.target.value as any})}
-                  className="w-full bg-retro-navy/50 border-b-2 border-white text-white font-body text-xl p-2 focus:outline-none"
-                 >
-                   <option value="MATCH">LEAGUE MATCH</option>
-                   <option value="TRAINING">TRAINING SESSION</option>
-                   <option value="SOCIAL">SOCIAL EVENT</option>
-                 </select>
-               </div>
-            </div>
+      {activeTab === 'EVENTS' && (
+        <RetroCard title="ADD NEW FIXTURE">
+           <form onSubmit={handleAddEvent} className="space-y-6">
+              <div className="grid md:grid-cols-2 gap-6">
+                 <div>
+                   <label className="block font-header text-xs text-gray-400 mb-2">EVENT TITLE</label>
+                   <input
+                    required
+                    type="text"
+                    value={eventForm.title}
+                    onChange={e => setEventForm({...eventForm, title: e.target.value})}
+                    className="w-full bg-retro-navy/50 border-b-2 border-white text-white font-body text-xl p-2 focus:outline-none"
+                    placeholder="VS. TEAM NAME"
+                   />
+                 </div>
+                 <div>
+                   <label className="block font-header text-xs text-gray-400 mb-2">DATE & TIME</label>
+                   <input
+                    required
+                    type="datetime-local"
+                    value={eventForm.date}
+                    onChange={e => setEventForm({...eventForm, date: e.target.value})}
+                    className="w-full bg-retro-navy/50 border-b-2 border-white text-white font-body text-xl p-2 focus:outline-none"
+                   />
+                 </div>
+              </div>
+              <div className="grid md:grid-cols-2 gap-6">
+                 <div>
+                   <label className="block font-header text-xs text-gray-400 mb-2">LOCATION</label>
+                   <input
+                    required
+                    type="text"
+                    value={eventForm.location}
+                    onChange={e => setEventForm({...eventForm, location: e.target.value})}
+                    className="w-full bg-retro-navy/50 border-b-2 border-white text-white font-body text-xl p-2 focus:outline-none"
+                    placeholder="FIELD NAME"
+                   />
+                 </div>
+                 <div>
+                   <label className="block font-header text-xs text-gray-400 mb-2">EVENT TYPE</label>
+                   <select
+                    value={eventForm.type}
+                    onChange={e => setEventForm({...eventForm, type: e.target.value as any})}
+                    className="w-full bg-retro-navy/50 border-b-2 border-white text-white font-body text-xl p-2 focus:outline-none"
+                   >
+                     <option value="MATCH">LEAGUE MATCH</option>
+                     <option value="TRAINING">TRAINING SESSION</option>
+                     <option value="SOCIAL">SOCIAL EVENT</option>
+                   </select>
+                 </div>
+              </div>
+              <RetroButton type="submit" className="w-full mt-4">PUBLISH EVENT</RetroButton>
+           </form>
+        </RetroCard>
+      )}
 
-            <RetroButton type="submit" className="w-full mt-4" disabled={submitting}>
-              {submitting ? 'SAVING TO CLOUD...' : 'PUBLISH EVENT'}
-            </RetroButton>
-         </form>
-      </RetroCard>
+      {activeTab === 'HISTORY' && (
+        <RetroCard title="ARCHIVE A MOMENT">
+           <form onSubmit={handleAddHistory} className="space-y-6">
+              <div className="grid md:grid-cols-2 gap-6">
+                 <div>
+                   <label className="block font-header text-xs text-gray-400 mb-2">TITLE</label>
+                   <input required type="text" value={historyForm.title} onChange={e => setHistoryForm({...historyForm, title: e.target.value})} className="w-full bg-retro-navy/50 border-b-2 border-white text-white font-body text-xl p-2 focus:outline-none" />
+                 </div>
+                 <div>
+                   <label className="block font-header text-xs text-gray-400 mb-2">YEAR</label>
+                   <input required type="text" value={historyForm.year} onChange={e => setHistoryForm({...historyForm, year: e.target.value})} className="w-full bg-retro-navy/50 border-b-2 border-white text-white font-body text-xl p-2 focus:outline-none" />
+                 </div>
+              </div>
+              <div>
+                <label className="block font-header text-xs text-gray-400 mb-2">IMAGE URL (OPTIONAL)</label>
+                <input type="text" value={historyForm.imageUrl} onChange={e => setHistoryForm({...historyForm, imageUrl: e.target.value})} className="w-full bg-retro-navy/50 border-b-2 border-white text-white font-body text-xl p-2 focus:outline-none" placeholder="https://..." />
+              </div>
+              <div>
+                 <label className="block font-header text-xs text-gray-400 mb-2">TYPE</label>
+                 <select value={historyForm.type} onChange={e => setHistoryForm({...historyForm, type: e.target.value as any})} className="w-full bg-retro-navy/50 border-b-2 border-white text-white font-body text-xl p-2 focus:outline-none">
+                    <option value="MOMENT">MEMORABLE MOMENT</option>
+                    <option value="TROPHY">TROPHY / AWARD</option>
+                 </select>
+              </div>
+              <div>
+                 <label className="block font-header text-xs text-gray-400 mb-2">DESCRIPTION</label>
+                 <textarea required rows={3} value={historyForm.description} onChange={e => setHistoryForm({...historyForm, description: e.target.value})} className="w-full bg-retro-navy/50 border-b-2 border-white text-white font-body text-xl p-2 focus:outline-none"></textarea>
+              </div>
+              <RetroButton type="submit" className="w-full mt-4">ARCHIVE ITEM</RetroButton>
+           </form>
+        </RetroCard>
+      )}
+
+      {activeTab === 'SQUAD' && (
+        <div className="space-y-8">
+           {/* Recruits Section */}
+           <div>
+             <h3 className="font-header text-xl text-retro-yellow mb-4">PENDING APPLICATIONS ({recruits.filter(r => r.status === 'PENDING').length})</h3>
+             <div className="grid gap-4">
+                {recruits.filter(r => r.status === 'PENDING').length === 0 && <p className="font-body text-gray-500">NO NEW APPLICATIONS.</p>}
+                {recruits.filter(r => r.status === 'PENDING').map(r => (
+                   <div key={r.id} className="bg-gray-900 border border-gray-700 p-4 flex justify-between items-center">
+                      <div>
+                        <p className="font-header text-white">{r.name}</p>
+                        <p className="font-body text-gray-400">{r.position} | Exp: {r.experience}</p>
+                      </div>
+                      <RetroButton onClick={() => handleApproveRecruit(r)} variant="secondary" className="text-[10px] py-2">APPROVE</RetroButton>
+                   </div>
+                ))}
+             </div>
+           </div>
+
+           {/* Active Squad Section */}
+           <div>
+             <h3 className="font-header text-xl text-retro-green mb-4">ACTIVE SQUAD ({squad.length})</h3>
+             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                {squad.map(player => (
+                   <div key={player.id} className="bg-retro-navy border border-retro-green p-4 text-center">
+                      <p className="font-header text-2xl text-white mb-1">{player.number}</p>
+                      <p className="font-body text-lg text-retro-gold uppercase">{player.name}</p>
+                      <p className="font-header text-[10px] text-gray-400">{player.position}</p>
+                   </div>
+                ))}
+             </div>
+           </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -313,20 +396,35 @@ export const AdminView: React.FC<{ onAddEvent: (evt: TeamEvent) => void; onRefre
 export const RecruitView: React.FC = () => {
   const [step, setStep] = useState<'FORM' | 'LOADING' | 'RESULT'>('FORM');
   const [formData, setFormData] = useState<RecruitProfile>({
-    name: '', position: 'Striker', favoritePlayer: '', experience: 'Sunday League'
+    name: '', position: 'Striker', favoritePlayer: '', experience: 'Sunday League', status: 'PENDING', submittedAt: ''
   });
   const [scoutCard, setScoutCard] = useState<ScoutCard | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setStep('LOADING');
+    
+    // 1. Generate the fun AI card
     const card = await generateScoutCard(formData);
     setScoutCard(card);
+
+    // 2. Save to Firebase
+    try {
+      await addRecruit({
+        name: formData.name,
+        position: formData.position,
+        favoritePlayer: formData.favoritePlayer,
+        experience: formData.experience
+      });
+    } catch (e) {
+      console.error("Could not save recruit to DB", e);
+    }
+
     setStep('RESULT');
   };
 
   const reset = () => {
-    setFormData({ name: '', position: 'Striker', favoritePlayer: '', experience: 'Sunday League' });
+    setFormData({ name: '', position: 'Striker', favoritePlayer: '', experience: 'Sunday League', status: 'PENDING', submittedAt: '' });
     setStep('FORM');
     setScoutCard(null);
   };
@@ -420,10 +518,13 @@ export const RecruitView: React.FC = () => {
                   "{scoutCard.description}"
                 </p>
               </div>
+              
+              <div className="bg-green-900/30 border border-green-500 p-2 mb-4 text-center">
+                 <p className="font-header text-xs text-green-400">APPLICATION SAVED TO DATABASE</p>
+              </div>
 
               <div className="flex gap-4">
-                <RetroButton onClick={reset} variant="secondary" className="flex-1">RESET</RetroButton>
-                <RetroButton onClick={() => alert("Application Sent to the Coach!")} className="flex-1">CONFIRM JOIN</RetroButton>
+                <RetroButton onClick={reset} variant="secondary" className="flex-1">RESET / NEW</RetroButton>
               </div>
            </RetroCard>
         </div>

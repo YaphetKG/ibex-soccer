@@ -1,44 +1,51 @@
-
 import React, { useState, useEffect } from 'react';
 import { ViewState, TeamEvent, HistoryItem } from './types';
 import { HomeView, EventsView, RecruitView, TacticsView, KitGenView, ChantView, HistoryView, AdminView } from './components/Views';
-import { fetchFromSheet } from './services/sheetService';
+import { subscribeToEvents, subscribeToHistory } from './services/firebase';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>(ViewState.HOME);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [systemError, setSystemError] = useState<{title: string, message: string, action: string} | null>(null);
 
   // --- Data State ---
-  const [events, setEvents] = useState<TeamEvent[]>([
-    { id: 1, title: 'League Match vs Durham Dynamo', date: '2023-11-15 15:00', location: 'WRAL Park', type: 'MATCH' },
-    { id: 2, title: 'Goat Yoga Recovery', date: '2023-11-16 10:00', location: 'City Plaza', type: 'SOCIAL' },
-  ]);
+  const [events, setEvents] = useState<TeamEvent[]>([]);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
 
-  const [history, setHistory] = useState<HistoryItem[]>([
-    { id: 1, title: "2023 CUP FINAL", description: "Ibex FC 2 - 1 Highlanders", year: "2023", type: "TROPHY", imageUrl: "🏆" },
-    { id: 2, title: "SUNDAY LEAGUE", description: "Division 2 Champions", year: "2022", type: "TROPHY", imageUrl: "🥇" },
-    { id: 3, title: "FIRST MATCH", description: "The squad assembles for the first time.", year: "2021", type: "MOMENT", imageUrl: "" },
-  ]);
-
-  // Load data from Sheets if configured
-  const refreshData = async () => {
-    setLoading(true);
-    const remoteEvents = await fetchFromSheet('getEvents');
-    if (remoteEvents) setEvents(remoteEvents);
-
-    const remoteHistory = await fetchFromSheet('getHistory');
-    if (remoteHistory) setHistory(remoteHistory);
-    setLoading(false);
-  };
-
+  // Real-time subscriptions to Firebase
   useEffect(() => {
-    refreshData();
-  }, []);
+    const handleDbError = (err: any) => {
+      if (err.message.includes("Cloud Firestore API has not been used") || err.message.includes("disabled")) {
+        setSystemError({
+          title: "DATABASE OFFLINE",
+          message: "The Cloud Firestore API is not enabled for project 'ibex-soccer'.",
+          action: "Go to Firebase Console > Build > Firestore Database > Create Database"
+        });
+      } else if (err.code === 'permission-denied') {
+        setSystemError({
+          title: "ACCESS DENIED",
+          message: "Security rules are blocking access.",
+          action: "Go to Firebase Console > Firestore > Rules > Allow read/write (for development)"
+        });
+      }
+    };
 
-  const handleAddEvent = (newEvent: TeamEvent) => {
-    setEvents(prev => [...prev, newEvent]);
-  };
+    // Subscribe to Events
+    const unsubscribeEvents = subscribeToEvents((data) => {
+      setEvents(data);
+      setSystemError(null); // Clear error on success
+    }, handleDbError);
+
+    // Subscribe to History
+    const unsubscribeHistory = subscribeToHistory((data) => {
+      setHistory(data);
+    }, handleDbError);
+
+    return () => {
+      unsubscribeEvents();
+      unsubscribeHistory();
+    };
+  }, []);
 
   const NavItem = ({ view, label }: { view: ViewState; label: string }) => (
     <button
@@ -58,6 +65,27 @@ const App: React.FC = () => {
     <div className="min-h-screen bg-retro-bg text-white flex flex-col crt relative selection:bg-retro-gold selection:text-black">
       {/* Scanline overlay fixed to screen */}
       <div className="fixed inset-0 pointer-events-none z-50 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-5"></div>
+
+      {/* SYSTEM ERROR OVERLAY */}
+      {systemError && (
+        <div className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4">
+          <div className="bg-retro-bg border-4 border-red-600 p-8 max-w-2xl w-full box-shadow-retro animate-pulse-fast">
+            <h2 className="font-header text-3xl text-red-600 mb-4 blink">CRITICAL SYSTEM FAILURE</h2>
+            <div className="border-t-2 border-red-800 my-4"></div>
+            <p className="font-body text-xl text-white mb-2">ERROR: <span className="text-red-400">{systemError.title}</span></p>
+            <p className="font-body text-lg text-gray-400 mb-6">{systemError.message}</p>
+            
+            <div className="bg-red-900/20 p-4 border border-red-500">
+              <p className="font-header text-xs text-red-400 mb-2">RECOMMENDED FIX:</p>
+              <p className="font-body text-white text-lg">{systemError.action}</p>
+            </div>
+            
+            <div className="mt-8 text-center">
+              <p className="font-body text-sm text-gray-600">AUTO-RETRYING CONNECTION...</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Navigation */}
       <nav className="border-b-4 border-white bg-retro-navy sticky top-0 z-40 shadow-[0px_4px_0px_0px_rgba(0,0,0,0.5)]">
@@ -113,13 +141,6 @@ const App: React.FC = () => {
         )}
       </nav>
 
-      {/* Loading Indicator */}
-      {loading && (
-        <div className="absolute top-20 right-4 z-50">
-          <div className="w-4 h-4 bg-retro-green animate-pulse"></div>
-        </div>
-      )}
-
       {/* Main Content */}
       <main className="flex-1 container mx-auto p-4 md:p-8 relative">
         {currentView === ViewState.HOME && <HomeView onNavigate={setCurrentView} />}
@@ -129,7 +150,7 @@ const App: React.FC = () => {
         {currentView === ViewState.TACTICS && <TacticsView />}
         {currentView === ViewState.KIT_GEN && <KitGenView />}
         {currentView === ViewState.CHANTS && <ChantView />}
-        {currentView === ViewState.ADMIN && <AdminView onAddEvent={handleAddEvent} onRefresh={refreshData} />}
+        {currentView === ViewState.ADMIN && <AdminView />}
       </main>
 
       {/* Footer */}

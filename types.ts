@@ -1,6 +1,6 @@
 
 export interface TeamEvent {
-  id: number;
+  id: string | number;
   title: string;
   date: string;
   location: string;
@@ -8,7 +8,7 @@ export interface TeamEvent {
 }
 
 export interface HistoryItem {
-  id: number;
+  id: string | number;
   title: string;
   description: string;
   year: string;
@@ -17,10 +17,21 @@ export interface HistoryItem {
 }
 
 export interface RecruitProfile {
+  id?: string;
   name: string;
   position: string;
   favoritePlayer: string;
   experience: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  submittedAt: string;
+}
+
+export interface SquadMember {
+  id: string;
+  name: string;
+  position: string;
+  number: number;
+  joinedDate: string;
 }
 
 export interface ScoutCard {
